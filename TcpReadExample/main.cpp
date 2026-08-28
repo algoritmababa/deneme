@@ -1,15 +1,32 @@
 // TCP'den gelen veriyi okuyan en kucuk ornek.
 // GUI yok, class yok, tek dosya. Sadece baglanir ve gelen byte'lari yazar.
 //
+// Baglanti bilgilerini asagidaki sabitlerden degistir.
+//
 // Derle:  qmake && make
-// Calistir:  ./TcpReadExample                     -> 127.0.0.1:5000
-//            ./TcpReadExample 192.168.1.100 5000
+// Calistir:  ./TcpReadExample                     -> asagidaki sabitler
+//            ./TcpReadExample 192.168.1.100 5000  -> sabitleri gecersiz kilar
 
 #include <QCoreApplication>
 #include <QTcpSocket>
 #include <QHostAddress>
 #include <QDateTime>
 #include <QDebug>
+
+// ---------------------------------------------------------------
+// AYARLAR - baglanti bilgilerini buradan degistir
+// ---------------------------------------------------------------
+
+// Baglanilacak cihazin adresi ve portu
+static const char *TARGET_IP   = "192.168.1.100";
+static const quint16 TARGET_PORT = 5000;
+
+// Cikis yapilacak kendi ag kartinin adresi.
+// Bos birakirsan isletim sistemi dogru karti kendisi secer;
+// birden fazla ag karti varsa buraya dogru olani yaz.
+static const char *LOCAL_IP = "";
+
+// ---------------------------------------------------------------
 
 // Qt 5.7'de toHex() ayirici almadigi icin bosluklari elle ekliyoruz.
 static QString bytesToHex(const QByteArray &data)
@@ -34,10 +51,21 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    QString host = (argc > 1) ? QString(argv[1]) : QString("127.0.0.1");
-    quint16 port = (argc > 2) ? QString(argv[2]).toUShort() : 5000;
+    // Komut satirindan verilirse sabitlerin yerine onlar kullanilir.
+    QString host = (argc > 1) ? QString(argv[1]) : QString(TARGET_IP);
+    quint16 port = (argc > 2) ? QString(argv[2]).toUShort() : TARGET_PORT;
 
     QTcpSocket socket;
+
+    QString localIp = QString(LOCAL_IP);
+    if (!localIp.isEmpty()) {
+        if (!socket.bind(QHostAddress(localIp), 0)) {
+            qDebug("[%s] BIND FAILED (%s): %s", qPrintable(now()),
+                   qPrintable(localIp), qPrintable(socket.errorString()));
+            return 1;
+        }
+        qDebug("[%s] Local IP: %s", qPrintable(now()), qPrintable(localIp));
+    }
 
     QObject::connect(&socket, &QTcpSocket::connected, [&]() {
         qDebug("[%s] CONNECTED", qPrintable(now()));

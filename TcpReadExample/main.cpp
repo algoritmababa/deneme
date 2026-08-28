@@ -3,9 +3,7 @@
 //
 // Baglanti bilgilerini asagidaki sabitlerden degistir.
 //
-// Derle:  qmake && make
-// Calistir:  ./TcpReadExample                     -> asagidaki sabitler
-//            ./TcpReadExample 192.168.1.100 5000  -> sabitleri gecersiz kilar
+// Qt Creator'da .pro dosyasini acip Run'a basman yeterli.
 
 #include <QCoreApplication>
 #include <QTcpSocket>
@@ -51,9 +49,8 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    // Komut satirindan verilirse sabitlerin yerine onlar kullanilir.
-    QString host = (argc > 1) ? QString(argv[1]) : QString(TARGET_IP);
-    quint16 port = (argc > 2) ? QString(argv[2]).toUShort() : TARGET_PORT;
+    QString host = QString(TARGET_IP);
+    quint16 port = TARGET_PORT;
 
     QTcpSocket socket;
 

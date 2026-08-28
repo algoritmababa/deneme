@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>420</width>
-    <height>860</height>
+    <height>1000</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -187,6 +187,89 @@
     </item>
     <item>
      <widget class="Line" name="lineTest2">
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelParamsTitle">
+      <property name="text">
+       <string>ALT SYSTEM PARAMETERS</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelModuleCountTitle">
+      <property name="text">
+       <string>Module Count:</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QSpinBox" name="spinModuleCount">
+      <property name="minimum">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <number>5</number>
+      </property>
+      <property name="value">
+       <number>3</number>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelDeviceControlTitle">
+      <property name="text">
+       <string>DEVICE CONTROL</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="btnStartDevice">
+      <property name="text">
+       <string>START DEVICE</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelResultSectionTitle">
+      <property name="text">
+       <string>RESULT</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelStartTitle">
+      <property name="text">
+       <string>Start:</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelStartResult">
+      <property name="text">
+       <string>-</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelResultModuleCountTitle">
+      <property name="text">
+       <string>Module Count:</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="labelResultModuleCount">
+      <property name="text">
+       <string>-</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="Line" name="lineParams2">
       <property name="orientation">
        <enum>Qt::Horizontal</enum>
       </property>

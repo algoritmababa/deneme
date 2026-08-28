@@ -77,6 +77,9 @@ MainWindow::MainWindow(QWidget *parent) :
             this, SLOT(onPacketReady(QByteArray)));
     connect(worker, SIGNAL(testResult(bool,QString)),
             this, SLOT(onTestResult(bool,QString)));
+
+    connect(ui->btnStartDevice, SIGNAL(clicked()),
+            this, SLOT(onStartDeviceClicked()));
 }
 
 MainWindow::~MainWindow()
@@ -217,4 +220,29 @@ void MainWindow::onSocketError()
 {
     ui->labelStatus->setText("DISCONNECTED");
     log("ERROR: " + socket->errorString());
+}
+
+// --- Alt sistem entegrasyon testi ------------------------------
+//
+// GUI protokolu bilmez: burada HEX, CRC, header, command id yoktur.
+// Sadece kullanici inputu AltSystemParameters'a yazilir ve
+// AltSystem API'nin dondugu sonuc ekrana basilir.
+
+void MainWindow::onStartDeviceClicked()
+{
+    parameters.setModuleCount(ui->spinModuleCount->value());
+
+    // TODO:
+    // Gercek AltSystem API dosyalari eklendiginde asagidaki uc satir
+    // acilacak. Paket olusturma, CRC ve RX decode AltSystem icinde kalir.
+    //
+    //   bool ok = altSystem->start(parameters);
+    //   ui->labelStartResult->setText(ok ? "SUCCESS" : "FAILED");
+    //   ui->labelResultModuleCount->setText(
+    //       ok ? QString::number(altSystem->moduleCount()) : QString("-"));
+
+    ui->labelStartResult->setText(
+        QString("AltSystem API bekleniyor (parametreye yazildi: moduleCount=%1)")
+            .arg(parameters.moduleCount()));
+    ui->labelResultModuleCount->setText("-");
 }

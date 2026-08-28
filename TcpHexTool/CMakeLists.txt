@@ -15,11 +15,13 @@ set(SOURCES
     main.cpp
     MainWindow.cpp
     AltSystemWorker.cpp
+    AltSystemParameters.cpp
 )
 
 set(HEADERS
     MainWindow.h
     AltSystemWorker.h
+    AltSystemParameters.h
 )
 
 set(FORMS

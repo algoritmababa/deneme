@@ -6,6 +6,7 @@
 #include <QTimer>
 
 #include "AltSystemWorker.h"
+#include "AltSystemParameters.h"
 
 namespace Ui { class MainWindow; }
 
@@ -34,6 +35,8 @@ private slots:
     void onPacketReady(const QByteArray &packet);
     void onTestResult(bool success, const QString &message);
 
+    void onStartDeviceClicked();
+
 private:
     void sendHex();
     void log(const QString &text);
@@ -42,6 +45,7 @@ private:
     QTcpSocket *socket;
     QTimer *timer;
     AltSystemWorker *worker;
+    AltSystemParameters parameters;
 };
 
 #endif // MAINWINDOW_H

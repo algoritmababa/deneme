@@ -6,8 +6,10 @@ TARGET    = TcpHexTool
 TEMPLATE  = app
 
 SOURCES  += main.cpp \
-            MainWindow.cpp
+            MainWindow.cpp \
+            AltSystemWorker.cpp
 
-HEADERS  += MainWindow.h
+HEADERS  += MainWindow.h \
+            AltSystemWorker.h
 
 FORMS    += MainWindow.ui

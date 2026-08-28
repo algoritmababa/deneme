@@ -14,10 +14,12 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets Network)
 set(SOURCES
     main.cpp
     MainWindow.cpp
+    AltSystemWorker.cpp
 )
 
 set(HEADERS
     MainWindow.h
+    AltSystemWorker.h
 )
 
 set(FORMS

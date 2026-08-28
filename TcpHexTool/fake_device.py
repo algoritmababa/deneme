@@ -9,6 +9,7 @@ Kullanim:
     python3 fake_device.py --port 5000 --interval 0.5
     python3 fake_device.py --no-periodic         # sadece gelene cevap ver
     python3 fake_device.py --ack "AA 55 81 00 FF"
+    python3 fake_device.py --icd                 # gercek protokol: Cihazi Baslat
 """
 
 import argparse
@@ -33,7 +34,13 @@ def make_frame(counter):
     return b"\xAA\x55" + struct.pack(">BH", counter & 0xFF, value) + b"\xFF"
 
 
-def serve_client(conn, addr, interval, ack, periodic):
+# Gercek protokol (Interface Control Document)
+# Cihazi Baslat -> alt sistemdeki toplam modul sayisi
+START_CMD = bytes.fromhex("000C0100C1B7")
+START_RSP = bytes.fromhex("000C020005C147")
+
+
+def serve_client(conn, addr, interval, ack, periodic, icd):
     print("[+] Baglandi: %s:%d" % addr)
     counter = 0
     next_tick = time.time() + interval
@@ -48,7 +55,13 @@ def serve_client(conn, addr, interval, ack, periodic):
                 print("[-] Baglanti kapandi: %s:%d" % addr)
                 return
             print("    RX: %s" % hexs(data))
-            if ack:
+            if icd:
+                if data == START_CMD:
+                    conn.sendall(START_RSP)
+                    print("    TX: %s  (Cihazi Baslat cevabi)" % hexs(START_RSP))
+                else:
+                    print("    (bilinmeyen komut, cevap yok)")
+            elif ack:
                 conn.sendall(ack)
                 print("    TX: %s  (ACK)" % hexs(ack))
 
@@ -70,6 +83,9 @@ def main():
                    help="gelen veriye donulecek HEX cevap ('' ise cevap yok)")
     p.add_argument("--no-periodic", action="store_true",
                    help="kendiliginden veri gonderme, sadece cevap ver")
+    p.add_argument("--icd", action="store_true",
+                   help="gercek protokole gore davran: periyodik veri yok, "
+                        "Cihazi Baslat komutuna gercek cevabi don")
     args = p.parse_args()
 
     ack = bytes.fromhex(args.ack.replace(" ", "")) if args.ack else b""
@@ -85,7 +101,8 @@ def main():
             conn, addr = server.accept()
             try:
                 serve_client(conn, addr, args.interval, ack,
-                             not args.no_periodic)
+                             not args.no_periodic and not args.icd,
+                             args.icd)
             except ConnectionResetError:
                 print("[-] Baglanti koptu: %s:%d" % addr)
             finally:

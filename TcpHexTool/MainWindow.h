@@ -5,6 +5,8 @@
 #include <QTcpSocket>
 #include <QTimer>
 
+#include "AltSystemWorker.h"
+
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow
@@ -28,6 +30,10 @@ private slots:
     void onReadyRead();
     void onSocketError();
 
+    void onTestClicked();
+    void onPacketReady(const QByteArray &packet);
+    void onTestResult(bool success, const QString &message);
+
 private:
     void sendHex();
     void log(const QString &text);
@@ -35,6 +41,7 @@ private:
     Ui::MainWindow *ui;
     QTcpSocket *socket;
     QTimer *timer;
+    AltSystemWorker *worker;
 };
 
 #endif // MAINWINDOW_H

@@ -70,6 +70,13 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(socket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(onSocketError()));
 
     connect(timer, SIGNAL(timeout()), this, SLOT(onSendClicked()));
+
+    worker = new AltSystemWorker(this);
+    connect(ui->btnTest, SIGNAL(clicked()), this, SLOT(onTestClicked()));
+    connect(worker, SIGNAL(packetReady(QByteArray)),
+            this, SLOT(onPacketReady(QByteArray)));
+    connect(worker, SIGNAL(testResult(bool,QString)),
+            this, SLOT(onTestResult(bool,QString)));
 }
 
 MainWindow::~MainWindow()
@@ -163,6 +170,47 @@ void MainWindow::onReadyRead()
 {
     QByteArray data = socket->readAll();
     log("RX: " + bytesToHex(data));
+
+    ui->labelTestRxValue->setText(bytesToHex(data));
+    worker->onRxData(data);
+}
+
+// --- Cihazi Baslat testi ---------------------------------------
+
+void MainWindow::onTestClicked()
+{
+    if (socket->state() != QAbstractSocket::ConnectedState) {
+        ui->labelResult->setText("Not connected");
+        log("Not connected");
+        return;
+    }
+
+    ui->labelTestRxValue->setText("-");
+    ui->labelResult->setText("Cevap bekleniyor...");
+    worker->startDevice();
+}
+
+// Worker paketi hazirladi: GUI'de goster ve TCP'den gonder.
+void MainWindow::onPacketReady(const QByteArray &packet)
+{
+    ui->labelPacketValue->setText(bytesToHex(packet));
+
+    // CRC paketin son iki byte'i: once dusuk, sonra yuksek byte.
+    ui->labelCrcValue->setText(bytesToHex(packet.right(2)));
+
+    socket->write(packet);
+    log("TX: " + bytesToHex(packet));
+}
+
+void MainWindow::onTestResult(bool success, const QString &message)
+{
+    QString text = success ? QString::fromUtf8("✓ CİHAZ BAŞLATILDI")
+                           : QString::fromUtf8("✗ CİHAZ BAŞLATILAMADI");
+    if (!message.isEmpty())
+        text += "  (" + message + ")";
+
+    ui->labelResult->setText(text);
+    log("TEST RESULT: " + text);
 }
 
 void MainWindow::onSocketError()

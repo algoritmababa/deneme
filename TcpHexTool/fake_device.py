@@ -37,8 +37,17 @@ import time
 START_CMD_PREFIX = bytes.fromhex("000C01")
 START_RSP_HEADER = bytes.fromhex("000C0200")
 
-# CRC hesabina giren byte sayisi (CRC alani ve sonrasi haric)
-CRC_INPUT_LENGTH = 4
+# CRC hesabina neyin girecegi. Elle degistir:
+#   1 = sadece ilk 4 byte
+#   2 = CRC alani haric butun byte'lar
+CRC_MODE = 1
+
+CRC_LENGTH = 2          # CRC alani her zaman 2 byte
+
+
+def crc_input(body):
+    """CRC'ye girecek byte'lar. body = paketin CRC oncesi kismi."""
+    return body[:4] if CRC_MODE == 1 else body
 
 
 def crc16_modbus(data):
@@ -106,7 +115,7 @@ def hexs(data):
 def make_start_response(module_count, corrupt_crc=False):
     """00 0C 02 00 <modul sayisi> + CRC (once dusuk, sonra yuksek byte)"""
     body = START_RSP_HEADER + bytes([module_count & 0xFF])
-    crc = crc16_modbus(body[:CRC_INPUT_LENGTH])
+    crc = crc16_modbus(crc_input(body))
     low, high = crc & 0xFF, (crc >> 8) & 0xFF
     if corrupt_crc:
         low ^= 0xFF

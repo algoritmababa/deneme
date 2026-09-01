@@ -50,6 +50,22 @@ def crc16_modbus(data):
     return crc
 
 
+def local_ipv4_addresses():
+    """Arayuzdeki IP listesi icin makinedeki IPv4 adresleri.
+
+    0.0.0.0 = tum arayuzler. Liste duzenlenebilir; burada gorunmeyen
+    bir adresi elle de yazabilirsin.
+    """
+    found = ["0.0.0.0", "127.0.0.1"]
+    try:
+        for addr in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if addr not in found:
+                found.append(addr)
+    except OSError:
+        pass
+    return found
+
+
 def hexs(data):
     """b'\\x00\\x0c' -> '00 0C'"""
     return " ".join("%02X" % b for b in data)
@@ -207,6 +223,11 @@ def run_gui(params, host, port):
     conn_row = ttk.Frame(frame)
     conn_row.pack(fill="x")
 
+    ttk.Label(conn_row, text="IP:").pack(side="left")
+    host_var = tk.StringVar(value=host)
+    ttk.Combobox(conn_row, textvariable=host_var, width=16,
+                 values=local_ipv4_addresses()).pack(side="left", padx=(4, 10))
+
     ttk.Label(conn_row, text="Port:").pack(side="left")
     port_var = tk.StringVar(value=str(port))
     ttk.Entry(conn_row, textvariable=port_var, width=8).pack(side="left", padx=(4, 10))
@@ -225,9 +246,13 @@ def run_gui(params, host, port):
             except ValueError:
                 log("HATA: gecersiz port")
                 return
-            if server.start(host, p):
+            h = host_var.get().strip()
+            if not h:
+                log("HATA: IP bos")
+                return
+            if server.start(h, p):
                 button_var.set("DURDUR")
-                status_var.set("Dinleniyor: %s:%d" % (host, p))
+                status_var.set("Dinleniyor: %s:%d" % (h, p))
 
     ttk.Button(conn_row, textvariable=button_var, command=toggle).pack(side="left")
     ttk.Label(conn_row, textvariable=status_var).pack(side="left", padx=10)

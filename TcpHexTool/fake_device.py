@@ -24,6 +24,7 @@ bir sonraki cevaba aninda yansir, yeniden baslatmak gerekmez.
 
 import argparse
 import socket
+import subprocess
 import threading
 import time
 
@@ -51,16 +52,47 @@ def crc16_modbus(data):
 
 
 def local_ipv4_addresses():
-    """Arayuzdeki IP listesi icin makinedeki IPv4 adresleri.
+    """Makinedeki IPv4 adresleri.
 
-    0.0.0.0 = tum arayuzler. Liste duzenlenebilir; burada gorunmeyen
-    bir adresi elle de yazabilirsin.
+    Once `ip -4 -o addr show` ciktisini okur; loopback alias'lari
+    (ip addr add ... dev lo) ancak boyle gorunur. O yoksa `hostname -I`,
+    o da yoksa makine adini cozmeye duser.
+
+    Liste duzenlenebilir: burada gorunmeyen bir adresi elle yazabilirsin.
     """
     found = ["0.0.0.0", "127.0.0.1"]
+
+    def add(addr):
+        addr = addr.strip()
+        if addr and addr not in found:
+            found.append(addr)
+
+    try:
+        out = subprocess.check_output(["ip", "-4", "-o", "addr", "show"],
+                                      stderr=subprocess.DEVNULL,
+                                      universal_newlines=True)
+        for line in out.splitlines():
+            parts = line.split()
+            # ornek: 1: lo inet 127.0.0.1/8 scope host lo ...
+            if "inet" in parts:
+                add(parts[parts.index("inet") + 1].split("/")[0])
+        return found
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        pass
+
+    try:
+        out = subprocess.check_output(["hostname", "-I"],
+                                      stderr=subprocess.DEVNULL,
+                                      universal_newlines=True)
+        for addr in out.split():
+            add(addr)
+        return found
+    except (OSError, subprocess.SubprocessError):
+        pass
+
     try:
         for addr in socket.gethostbyname_ex(socket.gethostname())[2]:
-            if addr not in found:
-                found.append(addr)
+            add(addr)
     except OSError:
         pass
     return found
@@ -225,8 +257,13 @@ def run_gui(params, host, port):
 
     ttk.Label(conn_row, text="IP:").pack(side="left")
     host_var = tk.StringVar(value=host)
-    ttk.Combobox(conn_row, textvariable=host_var, width=16,
-                 values=local_ipv4_addresses()).pack(side="left", padx=(4, 10))
+    host_box = ttk.Combobox(conn_row, textvariable=host_var, width=16,
+                            values=local_ipv4_addresses())
+    # Liste her acildiginda yeniden taranir; simulator acikken eklenen
+    # bir adresi gormek icin uygulamayi kapatip acmak gerekmez.
+    host_box.configure(postcommand=lambda: host_box.configure(
+        values=local_ipv4_addresses()))
+    host_box.pack(side="left", padx=(4, 10))
 
     ttk.Label(conn_row, text="Port:").pack(side="left")
     port_var = tk.StringVar(value=str(port))

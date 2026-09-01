@@ -6,7 +6,6 @@
 #include <QTimer>
 
 #include "AltSystemWorker.h"
-#include "AltSystemParameters.h"
 
 namespace Ui { class MainWindow; }
 
@@ -45,7 +44,6 @@ private:
     QTcpSocket *socket;
     QTimer *timer;
     AltSystemWorker *worker;
-    AltSystemParameters parameters;
 };
 
 #endif // MAINWINDOW_H

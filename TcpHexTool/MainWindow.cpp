@@ -225,24 +225,20 @@ void MainWindow::onSocketError()
 // --- Alt sistem entegrasyon testi ------------------------------
 //
 // GUI protokolu bilmez: burada HEX, CRC, header, command id yoktur.
-// Sadece kullanici inputu AltSystemParameters'a yazilir ve
-// AltSystem API'nin dondugu sonuc ekrana basilir.
+// Modul sayisi bir girdi degil, alt sistemden okunan sonuctur.
 
 void MainWindow::onStartDeviceClicked()
 {
-    parameters.setModuleCount(ui->spinModuleCount->value());
-
     // TODO:
-    // Gercek AltSystem API dosyalari eklendiginde asagidaki uc satir
-    // acilacak. Paket olusturma, CRC ve RX decode AltSystem icinde kalir.
+    // AltSistem baglandiginda asagidaki satirlar acilacak.
+    // Paket olusturma, CRC ve RX decode AltSistem icinde kalir.
     //
-    //   bool ok = altSystem->start(parameters);
+    //   altSistem->start();
+    //   bool ok = altSistem->isStarted();
     //   ui->labelStartResult->setText(ok ? "SUCCESS" : "FAILED");
     //   ui->labelResultModuleCount->setText(
-    //       ok ? QString::number(altSystem->moduleCount()) : QString("-"));
+    //       ok ? QString::number(altSistem->moduleCount()) : QString("-"));
 
-    ui->labelStartResult->setText(
-        QString("AltSystem API bekleniyor (parametreye yazildi: moduleCount=%1)")
-            .arg(parameters.moduleCount()));
+    ui->labelStartResult->setText("AltSistem API bekleniyor");
     ui->labelResultModuleCount->setText("-");
 }

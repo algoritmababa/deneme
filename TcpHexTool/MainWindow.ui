@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>420</width>
-    <height>1000</height>
+    <height>920</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -193,33 +193,6 @@
      </widget>
     </item>
     <item>
-     <widget class="QLabel" name="labelParamsTitle">
-      <property name="text">
-       <string>ALT SYSTEM PARAMETERS</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QLabel" name="labelModuleCountTitle">
-      <property name="text">
-       <string>Module Count:</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QSpinBox" name="spinModuleCount">
-      <property name="minimum">
-       <number>1</number>
-      </property>
-      <property name="maximum">
-       <number>5</number>
-      </property>
-      <property name="value">
-       <number>3</number>
-      </property>
-     </widget>
-    </item>
-    <item>
      <widget class="QLabel" name="labelDeviceControlTitle">
       <property name="text">
        <string>DEVICE CONTROL</string>
@@ -257,7 +230,7 @@
     <item>
      <widget class="QLabel" name="labelResultModuleCountTitle">
       <property name="text">
-       <string>Module Count:</string>
+       <string>Module Count (alt sistemden okunan):</string>
       </property>
      </widget>
     </item>

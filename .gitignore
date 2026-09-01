@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Qt / qmake build ciktilari
+Makefile
+*.o
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+.qmake.stash
+build/

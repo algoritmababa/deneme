@@ -1,117 +1,366 @@
 #!/usr/bin/env python3
-"""Sahte TCP cihazi - TcpHexTool'u fiziksel sistem yokken test etmek icin.
+"""Alt sistem simulatoru.
 
-Bagli istemciye periyodik olarak veri cercevesi yollar ve gelen her
-cerceveye ACK doner. Sadece Python standart kutuphanesi kullanir.
+TcpHexTool / AltSistem entegrasyon kodunu, gercek donanim bagli degilken
+test etmek icin kullanilir. Gercek bir TCP soketi acar ve Interface
+Control Document'taki protokole gore cevap verir; karsi taraf gercek
+cihazla konustugunu sanir.
+
+Protokol (dogrulanmis):
+    Giden : 00 0C 01 00 | C1 B7
+    Gelen : 00 0C 02 00 05 | C1 47
+                         ^^ modul sayisi
+    CRC-16/MODBUS, sadece ilk 4 byte uzerinden,
+    pakete once dusuk sonra yuksek byte olarak yazilir.
 
 Kullanim:
-    python3 fake_device.py                       # 0.0.0.0:5000, 1 sn'de bir veri
-    python3 fake_device.py --port 5000 --interval 0.5
-    python3 fake_device.py --no-periodic         # sadece gelene cevap ver
-    python3 fake_device.py --ack "AA 55 81 00 FF"
-    python3 fake_device.py --icd                 # gercek protokol: Cihazi Baslat
+    python3 fake_device.py                 # arayuzlu
+    python3 fake_device.py --nogui         # arayuzsuz (tkinter gerekmez)
+    python3 fake_device.py --nogui --port 5000 --modules 3
+
+Parametreler cevap URETILIRKEN okunur; arayuzden degistirdigin deger
+bir sonraki cevaba aninda yansir, yeniden baslatmak gerekmez.
 """
 
 import argparse
-import select
 import socket
-import struct
+import threading
 import time
+
+# ---------------------------------------------------------------
+# Protokol
+# ---------------------------------------------------------------
+
+# Komutu ilk 3 byte'tan taniyoruz; 4. byte'i entegrasyon kodu
+# degistirebilir, o yuzden esitlik aramiyoruz.
+START_CMD_PREFIX = bytes.fromhex("000C01")
+START_RSP_HEADER = bytes.fromhex("000C0200")
+
+# CRC hesabina giren byte sayisi (CRC alani ve sonrasi haric)
+CRC_INPUT_LENGTH = 4
+
+
+def crc16_modbus(data):
+    """CRC-16/MODBUS - polinom 0xA001 (reflected), baslangic 0xFFFF"""
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
 
 
 def hexs(data):
-    """b'\\xaa\\x55' -> 'AA 55'"""
+    """b'\\x00\\x0c' -> '00 0C'"""
     return " ".join("%02X" % b for b in data)
 
 
-def make_frame(counter):
-    """Sahte sensor cercevesi: AA 55 <sayac> <deger_hi> <deger_lo> FF
-
-    Deger, gercek bir olcum gibi yavasca salinsin diye sayaca bagli
-    basit bir ucgen dalga uretiyor (0..1000 arasi).
-    """
-    value = abs((counter * 37) % 2000 - 1000)
-    return b"\xAA\x55" + struct.pack(">BH", counter & 0xFF, value) + b"\xFF"
-
-
-# Gercek protokol (Interface Control Document)
-# Cihazi Baslat -> alt sistemdeki toplam modul sayisi
-START_CMD = bytes.fromhex("000C0100C1B7")
-START_RSP = bytes.fromhex("000C020005C147")
+def make_start_response(module_count, corrupt_crc=False):
+    """00 0C 02 00 <modul sayisi> + CRC (once dusuk, sonra yuksek byte)"""
+    body = START_RSP_HEADER + bytes([module_count & 0xFF])
+    crc = crc16_modbus(body[:CRC_INPUT_LENGTH])
+    low, high = crc & 0xFF, (crc >> 8) & 0xFF
+    if corrupt_crc:
+        low ^= 0xFF
+    return body + bytes([low, high])
 
 
-def serve_client(conn, addr, interval, ack, periodic, icd):
-    print("[+] Baglandi: %s:%d" % addr)
-    counter = 0
-    next_tick = time.time() + interval
+# ---------------------------------------------------------------
+# Simule edilen alt sistemin durumu
+# ---------------------------------------------------------------
 
-    while True:
-        timeout = max(0.0, next_tick - time.time()) if periodic else None
-        readable, _, _ = select.select([conn], [], [], timeout)
+class DeviceParams(object):
+    """Arayuzden yazilir, ag thread'inden okunur. Kilit ile korunur."""
 
-        if readable:
+    def __init__(self, module_count=5):
+        self._lock = threading.Lock()
+        self.module_count = module_count
+        self.response_delay_ms = 0
+        self.no_response = False
+        self.corrupt_crc = False
+
+    def snapshot(self):
+        """Cevap uretilecegi an degerlerin tutarli bir kopyasini alir."""
+        with self._lock:
+            return (self.module_count, self.response_delay_ms,
+                    self.no_response, self.corrupt_crc)
+
+    def set(self, **kwargs):
+        with self._lock:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+
+# ---------------------------------------------------------------
+# Ag tarafi - kendi thread'inde calisir
+# ---------------------------------------------------------------
+
+class DeviceServer(object):
+    def __init__(self, params, log):
+        self.params = params
+        self.log = log            # log(str) - arayuze ya da ekrana yazar
+        self._server = None
+        self._thread = None
+        self._running = False
+
+    def is_running(self):
+        return self._running
+
+    def start(self, host, port):
+        if self._running:
+            return False
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            server.bind((host, port))
+            server.listen(1)
+        except OSError as exc:
+            server.close()
+            self.log("HATA: %s" % exc)
+            return False
+
+        self._server = server
+        self._running = True
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+        self.log("Dinleniyor: %s:%d" % (host, port))
+        return True
+
+    def stop(self):
+        if not self._running:
+            return
+        self._running = False
+        if self._server is not None:
+            self._server.close()      # accept() bu sayede uyanir
+            self._server = None
+        self.log("Durduruldu")
+
+    def _accept_loop(self):
+        while self._running:
+            try:
+                conn, addr = self._server.accept()
+            except OSError:
+                return                # stop() soketi kapatti
+            self.log("Baglandi: %s:%d" % addr)
+            try:
+                self._serve(conn)
+            except (ConnectionResetError, BrokenPipeError):
+                self.log("Baglanti koptu")
+            finally:
+                conn.close()
+                self.log("Baglanti kapandi")
+
+    def _serve(self, conn):
+        while self._running:
             data = conn.recv(4096)
             if not data:
-                print("[-] Baglanti kapandi: %s:%d" % addr)
                 return
-            print("    RX: %s" % hexs(data))
-            if icd:
-                if data == START_CMD:
-                    conn.sendall(START_RSP)
-                    print("    TX: %s  (Cihazi Baslat cevabi)" % hexs(START_RSP))
-                else:
-                    print("    (bilinmeyen komut, cevap yok)")
-            elif ack:
-                conn.sendall(ack)
-                print("    TX: %s  (ACK)" % hexs(ack))
+            self.log("RX: %s" % hexs(data))
+            self._respond(conn, data)
 
-        if periodic and time.time() >= next_tick:
-            frame = make_frame(counter)
-            conn.sendall(frame)
-            print("    TX: %s" % hexs(frame))
-            counter += 1
-            next_tick += interval
+    def _respond(self, conn, data):
+        if data[:3] != START_CMD_PREFIX:
+            self.log("    bilinmeyen komut, cevap yok")
+            return
+
+        # Parametreler tam bu anda okunuyor: arayuzde yapilan degisiklik
+        # bir sonraki cevapta gecerli olur.
+        module_count, delay_ms, no_response, corrupt_crc = self.params.snapshot()
+
+        if no_response:
+            self.log("    cevap verilmedi (timeout testi)")
+            return
+
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
+
+        rsp = make_start_response(module_count, corrupt_crc)
+        conn.sendall(rsp)
+        self.log("TX: %s   (modul=%d%s)"
+                 % (hexs(rsp), module_count, ", CRC BOZUK" if corrupt_crc else ""))
+
+
+# ---------------------------------------------------------------
+# Arayuz - tkinter sadece burada import edilir
+# ---------------------------------------------------------------
+
+def run_gui(params, host, port):
+    import queue
+    import tkinter as tk
+    from tkinter import ttk
+
+    messages = queue.Queue()
+
+    def log(text):
+        messages.put("[%s] %s" % (time.strftime("%H:%M:%S"), text))
+
+    server = DeviceServer(params, log)
+
+    root = tk.Tk()
+    root.title("ALT SISTEM SIMULATOR")
+
+    frame = ttk.Frame(root, padding=10)
+    frame.pack(fill="both", expand=True)
+
+    # --- baglanti ---
+    conn_row = ttk.Frame(frame)
+    conn_row.pack(fill="x")
+
+    ttk.Label(conn_row, text="Port:").pack(side="left")
+    port_var = tk.StringVar(value=str(port))
+    ttk.Entry(conn_row, textvariable=port_var, width=8).pack(side="left", padx=(4, 10))
+
+    status_var = tk.StringVar(value="Durduruldu")
+    button_var = tk.StringVar(value="BASLAT")
+
+    def toggle():
+        if server.is_running():
+            server.stop()
+            button_var.set("BASLAT")
+            status_var.set("Durduruldu")
+        else:
+            try:
+                p = int(port_var.get())
+            except ValueError:
+                log("HATA: gecersiz port")
+                return
+            if server.start(host, p):
+                button_var.set("DURDUR")
+                status_var.set("Dinleniyor: %s:%d" % (host, p))
+
+    ttk.Button(conn_row, textvariable=button_var, command=toggle).pack(side="left")
+    ttk.Label(conn_row, textvariable=status_var).pack(side="left", padx=10)
+
+    ttk.Separator(frame).pack(fill="x", pady=8)
+
+    # --- parametreler ---
+    ttk.Label(frame, text="PARAMETRELER").pack(anchor="w")
+
+    param_row = ttk.Frame(frame)
+    param_row.pack(fill="x", pady=4)
+
+    ttk.Label(param_row, text="Module Count:").pack(side="left")
+    module_var = tk.IntVar(value=params.module_count)
+    ttk.Spinbox(param_row, from_=1, to=5, width=5, textvariable=module_var,
+                command=lambda: params.set(module_count=module_var.get())
+                ).pack(side="left", padx=(4, 16))
+
+    ttk.Label(param_row, text="Cevap gecikmesi (ms):").pack(side="left")
+    delay_var = tk.IntVar(value=params.response_delay_ms)
+    ttk.Spinbox(param_row, from_=0, to=10000, increment=100, width=7,
+                textvariable=delay_var,
+                command=lambda: params.set(response_delay_ms=delay_var.get())
+                ).pack(side="left", padx=4)
+
+    check_row = ttk.Frame(frame)
+    check_row.pack(fill="x")
+
+    no_rsp_var = tk.BooleanVar(value=params.no_response)
+    ttk.Checkbutton(check_row, text="Cevap verme (timeout testi)",
+                    variable=no_rsp_var,
+                    command=lambda: params.set(no_response=no_rsp_var.get())
+                    ).pack(side="left", padx=(0, 16))
+
+    crc_var = tk.BooleanVar(value=params.corrupt_crc)
+    ttk.Checkbutton(check_row, text="CRC'yi bozuk gonder",
+                    variable=crc_var,
+                    command=lambda: params.set(corrupt_crc=crc_var.get())
+                    ).pack(side="left")
+
+    ttk.Separator(frame).pack(fill="x", pady=8)
+
+    # --- trafik ---
+    ttk.Label(frame, text="TRAFIK").pack(anchor="w")
+
+    text = tk.Text(frame, height=14, width=60, state="disabled")
+    text.pack(fill="both", expand=True, pady=4)
+
+    def clear():
+        text.configure(state="normal")
+        text.delete("1.0", "end")
+        text.configure(state="disabled")
+
+    ttk.Button(frame, text="TEMIZLE", command=clear).pack(anchor="e")
+
+    def safe_int(var, fallback):
+        try:
+            return int(var.get())
+        except (ValueError, tk.TclError):
+            return fallback
+
+    # Spinbox'a elle yazilan degerler de gecerli olsun (ok tuslari disinda).
+    module_var.trace_add("write",
+        lambda *_: params.set(module_count=safe_int(module_var, params.module_count)))
+    delay_var.trace_add("write",
+        lambda *_: params.set(response_delay_ms=safe_int(delay_var, params.response_delay_ms)))
+
+    # Ag thread'inden gelen satirlari arayuze tasi.
+    def drain():
+        while True:
+            try:
+                line = messages.get_nowait()
+            except queue.Empty:
+                break
+            text.configure(state="normal")
+            text.insert("end", line + "\n")
+            text.see("end")
+            text.configure(state="disabled")
+        root.after(100, drain)
+
+    def on_close():
+        server.stop()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.after(100, drain)
+
+    toggle()          # acilir acilmaz dinlemeye basla
+    root.mainloop()
+
+
+# ---------------------------------------------------------------
+
+def run_headless(params, host, port):
+    def log(text):
+        print("[%s] %s" % (time.strftime("%H:%M:%S"), text))
+
+    server = DeviceServer(params, log)
+    if not server.start(host, port):
+        return 1
+
+    print("Ctrl-C ile cik")
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        server.stop()
+    return 0
 
 
 def main():
-    p = argparse.ArgumentParser(description="TcpHexTool icin sahte cihaz")
+    p = argparse.ArgumentParser(description="Alt sistem simulatoru")
     p.add_argument("--host", default="0.0.0.0", help="dinlenecek adres")
     p.add_argument("--port", type=int, default=5000, help="dinlenecek port")
-    p.add_argument("--interval", type=float, default=1.0,
-                   help="periyodik veri araligi (saniye)")
-    p.add_argument("--ack", default="AA 55 81 00 FF",
-                   help="gelen veriye donulecek HEX cevap ('' ise cevap yok)")
-    p.add_argument("--no-periodic", action="store_true",
-                   help="kendiliginden veri gonderme, sadece cevap ver")
-    p.add_argument("--icd", action="store_true",
-                   help="gercek protokole gore davran: periyodik veri yok, "
-                        "Cihazi Baslat komutuna gercek cevabi don")
+    p.add_argument("--modules", type=int, default=5,
+                   help="baslangictaki modul sayisi (varsayilan 5)")
+    p.add_argument("--nogui", action="store_true",
+                   help="arayuzsuz calistir (tkinter gerekmez)")
     args = p.parse_args()
 
-    ack = bytes.fromhex(args.ack.replace(" ", "")) if args.ack else b""
+    params = DeviceParams(module_count=args.modules)
 
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((args.host, args.port))
-    server.listen(1)
-    print("[*] Dinleniyor: %s:%d  (Ctrl-C ile cik)" % (args.host, args.port))
+    if args.nogui:
+        return run_headless(params, args.host, args.port)
 
     try:
-        while True:
-            conn, addr = server.accept()
-            try:
-                serve_client(conn, addr, args.interval, ack,
-                             not args.no_periodic and not args.icd,
-                             args.icd)
-            except ConnectionResetError:
-                print("[-] Baglanti koptu: %s:%d" % addr)
-            finally:
-                conn.close()
-    except KeyboardInterrupt:
-        print("\n[*] Kapatiliyor")
-    finally:
-        server.close()
+        run_gui(params, args.host, args.port)
+    except ImportError:
+        print("tkinter bulunamadi. Kurulum: sudo apt install python3-tk")
+        print("Ya da arayuzsuz calistir: python3 fake_device.py --nogui")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

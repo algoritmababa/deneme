@@ -2,10 +2,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QTcpSocket>
-#include <QTimer>
 
-#include "AltSystemWorker.h"
+// TODO (AltSistem): entegrasyon header'ini burada include et
+// #include "AltSistem.h"
 
 namespace Ui { class MainWindow; }
 
@@ -18,32 +17,13 @@ public:
     ~MainWindow();
 
 private slots:
-    void onConnectClicked();
-    void onDisconnectClicked();
-    void onSendClicked();
-    void onStartAutoClicked();
-    void onStopAutoClicked();
-    void onClearClicked();
-
-    void onConnected();
-    void onDisconnected();
-    void onReadyRead();
-    void onSocketError();
-
-    void onTestClicked();
-    void onPacketReady(const QByteArray &packet);
-    void onTestResult(bool success, const QString &message);
-
     void onStartDeviceClicked();
 
 private:
-    void sendHex();
-    void log(const QString &text);
-
     Ui::MainWindow *ui;
-    QTcpSocket *socket;
-    QTimer *timer;
-    AltSystemWorker *worker;
+
+    // TODO (AltSistem): entegrasyon nesnesini burada tut
+    // AltSistem *altSistem;
 };
 
 #endif // MAINWINDOW_H

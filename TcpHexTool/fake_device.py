@@ -159,7 +159,6 @@ class DeviceServer(object):
         self._server = None
         self._thread = None
         self._running = False
-        self._busy = False        # gercek cihaz gibi: ayni anda tek istemci
 
     def is_running(self):
         return self._running
@@ -189,29 +188,20 @@ class DeviceServer(object):
         if not self._running:
             return
         self._running = False
-        self._busy = False
         if self._server is not None:
             self._server.close()      # accept() bu sayede uyanir
             self._server = None
         self.log("Durduruldu")
 
     def _accept_loop(self):
-        # accept() surekli calisir; hizmet ayri bir thread'de verilir.
-        # Boylece ikinci bir baglanti isletim sistemi kuyrugunda sessizce
-        # beklemek yerine hemen reddedilir ve sebebi loga yazilir.
+        # Her baglantiya ayri bir thread'de hizmet verilir; ayni anda
+        # birden fazla istemci kabul edilir.
         while self._running:
             try:
                 conn, addr = self._server.accept()
             except OSError:
                 return                # stop() soketi kapatti
 
-            if self._busy:
-                # Gercek cihaz da ayni anda tek baglanti kabul ediyor.
-                self.log("REDDEDILDI: %s:%d - zaten bagli bir istemci var" % addr)
-                conn.close()
-                continue
-
-            self._busy = True
             self.log("Baglandi: %s:%d" % addr)
             threading.Thread(target=self._session, args=(conn,),
                              daemon=True).start()
@@ -223,7 +213,6 @@ class DeviceServer(object):
             self.log("Baglanti koptu")
         finally:
             conn.close()
-            self._busy = False
             self.log("Baglanti kapandi")
 
     def _serve(self, conn):

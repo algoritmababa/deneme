@@ -31,18 +31,35 @@ import time
 # ---------------------------------------------------------------
 # Protokol
 # ---------------------------------------------------------------
+#
+# Cerceve:  [adres] [komut] [veri boyutu] [veri...] [CRC lo] [CRC hi]
+#
+# adres      : modul adresi. 00 = tum moduller.
+# veri boyutu: veri alanindaki byte sayisi.
+# toplam     : 3 + boyut + 2
+# CRC        : CRC-16/MODBUS, pakete once dusuk sonra yuksek byte.
+#
+# Dogrulanmis ornekler:
+#   00 0C 01 00           | C1 B7    Cihazi Baslat istegi
+#   00 0C 02 00 05        | C1 47    cevap, 5 modul
+#   00 0B 01 00           | 70 76    Durum istegi, tum moduller
+#   02 0B 04 AA BB CC DD  | F2 E1    cevap, 2. modulun durumu
 
-# Komutu ilk 3 byte'tan taniyoruz; 4. byte'i entegrasyon kodu
-# degistirebilir, o yuzden esitlik aramiyoruz.
-START_CMD_PREFIX = bytes.fromhex("000C01")
-START_RSP_HEADER = bytes.fromhex("000C0200")
+CMD_START = 0x0C          # Cihazi Baslat / modul sayisi
+CMD_STATUS = 0x0B         # Modul durumlari
+
+ADDR_ALL = 0x00           # tum moduller
+
+STATUS_BYTES = 4          # modul basina durum kelimesi (little endian, LSB first)
 
 # CRC hesabina neyin girecegi. Elle degistir:
 #   1 = sadece ilk 4 byte
 #   2 = CRC alani haric butun byte'lar
 CRC_MODE = 1
 
-CRC_LENGTH = 2          # CRC alani her zaman 2 byte
+CRC_LENGTH = 2            # CRC alani her zaman 2 byte
+
+MAX_MODULES = 5
 
 
 def crc_input(body):
@@ -60,66 +77,42 @@ def crc16_modbus(data):
     return crc
 
 
-def local_ipv4_addresses():
-    """Makinedeki IPv4 adresleri.
-
-    Once `ip -4 -o addr show` ciktisini okur; loopback alias'lari
-    (ip addr add ... dev lo) ancak boyle gorunur. O yoksa `hostname -I`,
-    o da yoksa makine adini cozmeye duser.
-
-    Liste duzenlenebilir: burada gorunmeyen bir adresi elle yazabilirsin.
-    """
-    found = ["0.0.0.0", "127.0.0.1"]
-
-    def add(addr):
-        addr = addr.strip()
-        if addr and addr not in found:
-            found.append(addr)
-
-    try:
-        out = subprocess.check_output(["ip", "-4", "-o", "addr", "show"],
-                                      stderr=subprocess.DEVNULL,
-                                      universal_newlines=True)
-        for line in out.splitlines():
-            parts = line.split()
-            # ornek: 1: lo inet 127.0.0.1/8 scope host lo ...
-            if "inet" in parts:
-                add(parts[parts.index("inet") + 1].split("/")[0])
-        return found
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        pass
-
-    try:
-        out = subprocess.check_output(["hostname", "-I"],
-                                      stderr=subprocess.DEVNULL,
-                                      universal_newlines=True)
-        for addr in out.split():
-            add(addr)
-        return found
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-    try:
-        for addr in socket.gethostbyname_ex(socket.gethostname())[2]:
-            add(addr)
-    except OSError:
-        pass
-    return found
-
-
 def hexs(data):
-    """b'\\x00\\x0c' -> '00 0C'"""
+    """b'\x00\x0c' -> '00 0C'"""
     return " ".join("%02X" % b for b in data)
 
 
-def make_start_response(module_count, corrupt_crc=False):
-    """00 0C 02 00 <modul sayisi> + CRC (once dusuk, sonra yuksek byte)"""
-    body = START_RSP_HEADER + bytes([module_count & 0xFF])
+def build_frame(addr, cmd, data, corrupt_crc=False):
+    """Cerceveyi kurar ve CRC'sini ekler."""
+    body = bytes([addr, cmd, len(data)]) + bytes(data)
     crc = crc16_modbus(crc_input(body))
     low, high = crc & 0xFF, (crc >> 8) & 0xFF
     if corrupt_crc:
         low ^= 0xFF
     return body + bytes([low, high])
+
+
+def make_start_response(module_count, corrupt_crc=False):
+    """00 0C 02 00 <modul sayisi> + CRC"""
+    return build_frame(ADDR_ALL, CMD_START,
+                       bytes([0x00, module_count & 0xFF]), corrupt_crc)
+
+
+def make_status_response(addr, module_count, statuses, corrupt_crc=False):
+    """Tek modul icin 4 byte, tum moduller icin modul sayisi x 4 byte.
+
+    statuses: modul basina 4 byte'lik durum kelimesi, hat uzerindeki
+    siralamasiyla (little endian, LSB first - Bit 0 ilk byte'in en
+    dusuk biti).
+    """
+    if addr == ADDR_ALL:
+        data = b"".join(statuses[i] for i in range(module_count))
+    else:
+        if addr > module_count:
+            return None               # olmayan modul: cevap yok
+        data = statuses[addr - 1]
+
+    return build_frame(addr, CMD_STATUS, data, corrupt_crc)
 
 
 # ---------------------------------------------------------------
@@ -136,16 +129,27 @@ class DeviceParams(object):
         self.no_response = False
         self.corrupt_crc = False
 
+        # Modul basina durum kelimesi, hat uzerindeki byte siralamasiyla.
+        # Varsayilan olarak her modul kendi numarasini tasir, boylece
+        # cevaptaki sira dogrulanabilir.
+        self.module_status = [bytes([n + 1, 0x00, 0x00, 0x00])
+                              for n in range(MAX_MODULES)]
+
     def snapshot(self):
         """Cevap uretilecegi an degerlerin tutarli bir kopyasini alir."""
         with self._lock:
             return (self.module_count, self.response_delay_ms,
-                    self.no_response, self.corrupt_crc)
+                    self.no_response, self.corrupt_crc,
+                    list(self.module_status))
 
     def set(self, **kwargs):
         with self._lock:
             for key, value in kwargs.items():
                 setattr(self, key, value)
+
+    def set_module_status(self, index, value):
+        with self._lock:
+            self.module_status[index] = value
 
 
 # ---------------------------------------------------------------
@@ -224,13 +228,32 @@ class DeviceServer(object):
             self._respond(conn, data)
 
     def _respond(self, conn, data):
-        if data[:3] != START_CMD_PREFIX:
-            self.log("    bilinmeyen komut, cevap yok")
+        if len(data) < 3:
+            self.log("    cok kisa paket, cevap yok")
             return
+
+        addr, cmd = data[0], data[1]
 
         # Parametreler tam bu anda okunuyor: arayuzde yapilan degisiklik
         # bir sonraki cevapta gecerli olur.
-        module_count, delay_ms, no_response, corrupt_crc = self.params.snapshot()
+        (module_count, delay_ms, no_response,
+         corrupt_crc, statuses) = self.params.snapshot()
+
+        if cmd == CMD_START:
+            rsp = make_start_response(module_count, corrupt_crc)
+            note = "modul sayisi=%d" % module_count
+        elif cmd == CMD_STATUS:
+            rsp = make_status_response(addr, module_count, statuses, corrupt_crc)
+            note = ("tum moduller" if addr == ADDR_ALL
+                    else "modul %d" % addr)
+        else:
+            self.log("    bilinmeyen komut 0x%02X, cevap yok" % cmd)
+            return
+
+        if rsp is None:
+            self.log("    modul %d yok (toplam %d), cevap yok"
+                     % (addr, module_count))
+            return
 
         if no_response:
             self.log("    cevap verilmedi (timeout testi)")
@@ -239,10 +262,9 @@ class DeviceServer(object):
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
 
-        rsp = make_start_response(module_count, corrupt_crc)
         conn.sendall(rsp)
-        self.log("TX: %s   (modul=%d%s)"
-                 % (hexs(rsp), module_count, ", CRC BOZUK" if corrupt_crc else ""))
+        self.log("TX: %s   (%s%s)"
+                 % (hexs(rsp), note, ", CRC BOZUK" if corrupt_crc else ""))
 
 
 # ---------------------------------------------------------------
@@ -348,10 +370,40 @@ def run_gui(params, host, port):
 
     ttk.Separator(frame).pack(fill="x", pady=8)
 
+    # --- modul durumlari ---
+    ttk.Label(frame, text="MODUL DURUMLARI  (hat uzerindeki 4 byte, "
+                          "Bit 0 = ilk byte'in en dusuk biti)").pack(anchor="w")
+
+    def set_status(index, var):
+        """Girilen HEX metni 4 byte'a cevirir; eksik/hataliysa yok sayar."""
+        text = var.get().replace(" ", "")
+        if len(text) != 8:
+            return
+        try:
+            value = bytes.fromhex(text)
+        except ValueError:
+            return
+        params.set_module_status(index, value)
+
+    for i in range(MAX_MODULES):
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=1)
+        ttk.Label(row, text="Modul %d:" % (i + 1), width=9).pack(side="left")
+        var = tk.StringVar(value=hexs(params.module_status[i]))
+        entry = ttk.Entry(row, textvariable=var, width=14)
+        entry.pack(side="left")
+        var.trace_add("write",
+                      lambda *_, idx=i, v=var: set_status(idx, v))
+
+    ttk.Label(frame, text="(sadece ilk 'Module Count' satiri kullanilir)"
+              ).pack(anchor="w")
+
+    ttk.Separator(frame).pack(fill="x", pady=8)
+
     # --- trafik ---
     ttk.Label(frame, text="TRAFIK").pack(anchor="w")
 
-    text = tk.Text(frame, height=14, width=60, state="disabled")
+    text = tk.Text(frame, height=10, width=64, state="disabled")
     text.pack(fill="both", expand=True, pady=4)
 
     def clear():

@@ -36,37 +36,11 @@ def make_frame(counter):
 
 # Gercek protokol (Interface Control Document)
 # Cihazi Baslat -> alt sistemdeki toplam modul sayisi
-#   Giden : 00 0C 01 00 | C1 B7
-#   Gelen : 00 0C 02 00 05 | C1 47
-#                       ^^ modul sayisi
-#
-# Komutu ilk 3 byte'tan tanitiyoruz; 4. byte'i entegrasyon kodu
-# degistirebilir, o yuzden esitlik aramiyoruz.
-START_CMD_PREFIX = bytes.fromhex("000C01")
-START_RSP_HEADER = bytes.fromhex("000C0200")
-
-# CRC hesabina giren byte sayisi (CRC alani ve sonrasi haric)
-CRC_INPUT_LENGTH = 4
+START_CMD = bytes.fromhex("000C0100C1B7")
+START_RSP = bytes.fromhex("000C020005C147")
 
 
-def crc16_modbus(data):
-    """CRC-16/MODBUS - polinom 0xA001 (reflected), baslangic 0xFFFF"""
-    crc = 0xFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
-    return crc
-
-
-def make_start_response(module_count):
-    """00 0C 02 00 <modul sayisi> + CRC (once dusuk, sonra yuksek byte)"""
-    body = START_RSP_HEADER + bytes([module_count])
-    crc = crc16_modbus(body[:CRC_INPUT_LENGTH])
-    return body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
-
-
-def serve_client(conn, addr, interval, ack, periodic, icd, module_count):
+def serve_client(conn, addr, interval, ack, periodic, icd):
     print("[+] Baglandi: %s:%d" % addr)
     counter = 0
     next_tick = time.time() + interval
@@ -82,11 +56,9 @@ def serve_client(conn, addr, interval, ack, periodic, icd, module_count):
                 return
             print("    RX: %s" % hexs(data))
             if icd:
-                if data[:3] == START_CMD_PREFIX:
-                    rsp = make_start_response(module_count)
-                    conn.sendall(rsp)
-                    print("    TX: %s  (Cihazi Baslat cevabi, modul=%d)"
-                          % (hexs(rsp), module_count))
+                if data == START_CMD:
+                    conn.sendall(START_RSP)
+                    print("    TX: %s  (Cihazi Baslat cevabi)" % hexs(START_RSP))
                 else:
                     print("    (bilinmeyen komut, cevap yok)")
             elif ack:
@@ -111,8 +83,6 @@ def main():
                    help="gelen veriye donulecek HEX cevap ('' ise cevap yok)")
     p.add_argument("--no-periodic", action="store_true",
                    help="kendiliginden veri gonderme, sadece cevap ver")
-    p.add_argument("--modules", type=int, default=5,
-                   help="--icd modunda bildirilecek modul sayisi (varsayilan 5)")
     p.add_argument("--icd", action="store_true",
                    help="gercek protokole gore davran: periyodik veri yok, "
                         "Cihazi Baslat komutuna gercek cevabi don")
@@ -132,7 +102,7 @@ def main():
             try:
                 serve_client(conn, addr, args.interval, ack,
                              not args.no_periodic and not args.icd,
-                             args.icd, args.modules)
+                             args.icd)
             except ConnectionResetError:
                 print("[-] Baglanti koptu: %s:%d" % addr)
             finally:

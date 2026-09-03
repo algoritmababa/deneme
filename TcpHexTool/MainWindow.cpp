@@ -12,6 +12,8 @@ MainWindow::MainWindow(QWidget *parent) :
 
     connect(ui->btnStartDevice, SIGNAL(clicked()),
             this, SLOT(onStartDeviceClicked()));
+    connect(ui->btnModuleStatus, SIGNAL(clicked()),
+            this, SLOT(onModuleStatusClicked()));
 }
 
 MainWindow::~MainWindow()
@@ -38,4 +40,21 @@ void MainWindow::onStartDeviceClicked()
 
     ui->labelStartResult->setText("AltSistem baglanmadi");
     ui->labelResultModuleCount->setText("-");
+}
+
+// Modul adresi bir GUI girdisi: hangi modulun durumu istendigini
+// kullanici secer. 0 = tum moduller.
+// Cevabin cozumlenmesi yine AltSistem'in isi; GUI byte gormez.
+void MainWindow::onModuleStatusClicked()
+{
+    int address = ui->spinModuleAddress->value();
+
+    // TODO (AltSistem): asagidaki satirlari kendi fonksiyon adlarinla ac
+    //
+    //   altSistem->readModuleStatus(address);
+    //
+    //   ui->textModuleStatus->setPlainText(altSistem->moduleStatusText());
+
+    ui->textModuleStatus->setPlainText(
+        QString("AltSistem baglanmadi (istenen adres: %1)").arg(address));
 }

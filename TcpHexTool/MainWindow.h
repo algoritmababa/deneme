@@ -18,6 +18,7 @@ public:
 
 private slots:
     void onStartDeviceClicked();
+    void onModuleStatusClicked();
 
 private:
     Ui::MainWindow *ui;
